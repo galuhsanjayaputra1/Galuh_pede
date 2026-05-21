@@ -25,8 +25,7 @@ logger = logging.getLogger(__name__)
 # === Configuration ===
 COLLECTION_NAME = "scientific_articles"
 EMBEDDING_MODEL = "nomic-ai/nomic-embed-text-v1.5"  # 8192 context window, 768 dimensions
-QDRANT_HOST = "localhost"
-QDRANT_PORT = 6333
+QDRANT_PATH = "./qdrant_db"
 
 
 class VectorStore:
@@ -41,8 +40,7 @@ class VectorStore:
     
     def __init__(
         self,
-        qdrant_host: str = QDRANT_HOST,
-        qdrant_port: int = QDRANT_PORT,
+        qdrant_path: str = QDRANT_PATH,
         embedding_model: str = EMBEDDING_MODEL,
         collection_name: str = COLLECTION_NAME,
     ):
@@ -92,8 +90,8 @@ class VectorStore:
             
         self.vector_size = self.model.get_embedding_dimension()
         
-        logger.info(f"Connecting to Qdrant at {qdrant_host}:{qdrant_port}")
-        self.client = QdrantClient(host=qdrant_host, port=qdrant_port)
+        logger.info(f"Connecting to Qdrant Local DB at {qdrant_path}")
+        self.client = QdrantClient(path=qdrant_path)
         self.collection_name = collection_name
         
         logger.info(f"VectorStore ready. Embedding dim: {self.vector_size}")

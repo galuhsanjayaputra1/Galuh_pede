@@ -182,15 +182,9 @@ Examples:
         help="PDF file(s) or directory containing PDFs",
     )
     parser.add_argument(
-        "--qdrant-host",
-        default="localhost",
-        help="Qdrant server host (default: localhost)",
-    )
-    parser.add_argument(
-        "--qdrant-port",
-        type=int,
-        default=6333,
-        help="Qdrant server port (default: 6333)",
+        "--qdrant-path",
+        default="./qdrant_db",
+        help="Qdrant local DB path (default: ./qdrant_db)",
     )
     parser.add_argument(
         "--collection",
@@ -236,8 +230,7 @@ Examples:
     # Initialize vector store
     logger.info("Initializing PEDE...")
     vector_store = VectorStore(
-        qdrant_host=args.qdrant_host,
-        qdrant_port=args.qdrant_port,
+        qdrant_path=args.qdrant_path,
         collection_name=args.collection,
     )
     vector_store.ensure_collection()

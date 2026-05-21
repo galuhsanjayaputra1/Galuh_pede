@@ -10,13 +10,7 @@ PDF → Markdown → Smart Chunking + Metadata → Embedding → Qdrant Vector D
 
 ## Quick Start
 
-### 1. Start Qdrant (Docker)
-
-```bash
-docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant
-```
-
-### 2. Install Dependencies
+### 1. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
@@ -84,8 +78,7 @@ positional:
   paths                  PDF file(s) or directory
 
 options:
-  --qdrant-host HOST     Qdrant host (default: localhost)
-  --qdrant-port PORT     Qdrant port (default: 6333)
+  --qdrant-path PATH     Qdrant local DB path (default: ./qdrant_db)
   --collection NAME      Collection name (default: scientific_articles)
   --chunk-size N         Max chunk size in chars (default: 1000)
   --chunk-overlap N      Chunk overlap in chars (default: 200)
