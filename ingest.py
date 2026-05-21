@@ -63,7 +63,7 @@ def setup_directories():
 
 
 def process_single_pdf(
-    pdf_path: str, vector_store: VectorStore, skip_references: bool = False
+    pdf_path: str, vector_store: VectorStore, include_references: bool = False
 ) -> ArticleMetadata | None:
     """
     Process a single PDF through the full pipeline:
@@ -115,7 +115,7 @@ def process_single_pdf(
         logger.info("[3/4] Chunking markdown...")
         chunks = chunk_markdown(markdown_text, article_meta)
         
-        if skip_references:
+        if not include_references:
             original_count = len(chunks)
             chunks = [c for c in chunks if c.content_type != "references"]
             logger.info(f"  -> Skipped {original_count - len(chunks)} reference chunks.")
@@ -220,9 +220,9 @@ Examples:
         help="Show collection statistics",
     )
     parser.add_argument(
-        "--skip-references",
+        "--include-references",
         action="store_true",
-        help="Exclude bibliography/reference chunks from being stored in the database",
+        help="Include bibliography/reference chunks in the database (default is to skip them)",
     )
     parser.add_argument(
         "--search",
@@ -301,7 +301,7 @@ Examples:
     results = []
     for i, pdf_path in enumerate(pdf_paths, 1):
         logger.info(f"\n[{i}/{len(pdf_paths)}]")
-        meta = process_single_pdf(pdf_path, vector_store, args.skip_references)
+        meta = process_single_pdf(pdf_path, vector_store, args.include_references)
         results.append((pdf_path, meta))
     
     # === Summary ===
