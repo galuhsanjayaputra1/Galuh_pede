@@ -7,6 +7,11 @@ storing/retrieving chunks from Qdrant vector database.
 
 import os
 import logging
+from dotenv import load_dotenv
+
+# Load env variables (for Qdrant Cloud)
+load_dotenv()
+
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
@@ -25,7 +30,11 @@ logger = logging.getLogger(__name__)
 # === Configuration ===
 COLLECTION_NAME = "scientific_articles"
 EMBEDDING_MODEL = "BAAI/bge-m3"  # 8192 context window, 1024 dimensions, Multi-lingual
-QDRANT_PATH = "./qdrant_db"
+
+# Qdrant Database Settings (Local or Cloud)
+QDRANT_PATH = os.environ.get("QDRANT_PATH", "./qdrant_db")
+QDRANT_URL = os.environ.get("QDRANT_URL", "")
+QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY", "")
 
 
 class VectorStore:
@@ -89,10 +98,15 @@ class VectorStore:
                 os.environ.pop("TRANSFORMERS_OFFLINE", None)
             
         self.vector_size = self.model.get_embedding_dimension()
-        
-        logger.info(f"Connecting to Qdrant Local DB at {qdrant_path}")
-        self.client = QdrantClient(path=qdrant_path)
         self.collection_name = collection_name
+        
+        # Connect to Cloud if URL is provided, otherwise use Local DB
+        if QDRANT_URL and QDRANT_API_KEY:
+            logger.info(f"Connecting to Qdrant Cloud at {QDRANT_URL}")
+            self.client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+        else:
+            logger.info(f"Connecting to Qdrant Local DB at {qdrant_path}")
+            self.client = QdrantClient(path=qdrant_path)
         
         logger.info(f"VectorStore ready. Embedding dim: {self.vector_size}")
     

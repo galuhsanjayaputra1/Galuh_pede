@@ -222,4 +222,9 @@ __marimo__/
 # === PEDE Project ===
 data/
 uploads/
+papers/
+qdrant_db/
+qdrant_db_hasil.zip
+pede_colab.zip
+hasil_chunking.json
 *.pdf

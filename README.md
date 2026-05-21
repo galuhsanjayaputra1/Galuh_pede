@@ -6,6 +6,12 @@ Pipeline CLI untuk mengkonversi artikel ilmiah PDF ke vector embeddings di Qdran
 PDF → Markdown → Smart Chunking + Metadata → Embedding → Qdrant Vector DB
 ```
 
+cek hasil chunking:
+
+```sh
+python dump_chunks.py --doi "10.1016/j.inpa.2026.02.006"
+```
+
 > **📖 BACA DOKUMENTASI LENGKAP API:** Silakan cek file [API_REFERENCE.md](file:///c:/Users/Rolly%20Maulana%20Awangg/Documents/if/pede/API_REFERENCE.md) untuk melihat daftar lengkap *endpoint* dan cara melakukan RAG via HTTP!
 
 > **🚀 PROSES PDF DENGAN GPU GRATIS:** Ingin memproses ribuan jurnal ilmiah dalam hitungan detik? Baca panduannya di [COLAB.md](file:///c:/Users/Rolly%20Maulana%20Awangg/Documents/if/pede/COLAB.md).
