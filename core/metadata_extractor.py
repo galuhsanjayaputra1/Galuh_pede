@@ -208,13 +208,10 @@ def extract_metadata(
     3. CrossRef API (if DOI found)
     """
     import os
+    import hashlib
     filename = os.path.basename(pdf_path)
 
-    # Use UUIDv5 with filename to ensure deterministic ID and prevent duplicates in DB
-    deterministic_id = str(uuid.uuid5(uuid.NAMESPACE_URL, filename))
-
     meta = ArticleMetadata(
-        article_id=deterministic_id,
         filename=filename,
         total_pages=pdf_native_meta.get("page_count", 0),
     )
@@ -256,8 +253,20 @@ def extract_metadata(
             if crossref.get("keywords"):
                 meta.keywords = crossref["keywords"]
 
+    # === Generate Robust Deterministic ID ===
+    # Best practice: use DOI if available. If not, use the SHA-256 hash of the file contents.
+    if meta.doi:
+        meta.article_id = str(uuid.uuid5(uuid.NAMESPACE_URL, meta.doi))
+    else:
+        # Read file bytes to generate a unique hash for identical files with different names
+        hasher = hashlib.sha256()
+        with open(pdf_path, 'rb') as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hasher.update(chunk)
+        meta.article_id = str(uuid.uuid5(uuid.NAMESPACE_URL, hasher.hexdigest()))
+
     logger.info(
         f"Metadata extracted for '{meta.title}': "
-        f"{len(meta.authors)} authors, DOI={meta.doi}"
+        f"{len(meta.authors)} authors, DOI={meta.doi}, ID={meta.article_id}"
     )
     return meta
