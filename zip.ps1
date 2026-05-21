@@ -1,1 +1,1 @@
-Compress-Archive -Path "core", "api.py", "ingest.py", "requirements.txt" -DestinationPath "pede_colab.zip" -Force
+Compress-Archive -Path "core", "api.py", "ingest.py", "dump_chunks.py", "requirements.txt" -DestinationPath "pede_colab.zip" -Force
