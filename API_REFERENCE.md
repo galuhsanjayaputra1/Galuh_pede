@@ -51,8 +51,9 @@ Melakukan pencarian semantik tingkat lanjut ke dokumen-dokumen ilmiah yang telah
 |-------|-----------|-------|---------|-----------|
 | `query` | `string` | **Ya** | - | Kalimat pertanyaan atau kata kunci yang dicari. |
 | `limit` | `int` | Tidak | `5` | Jumlah *chunks* (paragraf) maksimum yang ingin dikembalikan. |
-| `article_id` | `string` | Tidak | `null` | UUID spesifik artikel jika ingin membatasi (*filter*) pencarian hanya di 1 artikel. |
-| `section_filter` | `string` | Tidak | `null` | Nama header sub-bab jika ingin membatasi pencarian (misal: "Methods"). |
+| `article_id` | `string` | Tidak | `null` | UUID spesifik artikel jika ingin membatasi pencarian. |
+| `doi` | `string` | Tidak | `null` | Filter berdasarkan DOI artikel (alternatif yang lebih mudah dibanding UUID). |
+| `section_filter` | `string` | Tidak | `null` | Nama header sub-bab jika ingin membatasi pencarian. |
 
 **Contoh Payload Request:**
 ```json
@@ -114,7 +115,7 @@ curl -X 'POST' \
 }'
 ```
 
-**Mencari Spesifik di 1 Artikel Saja (Filtered Search):**
+**Mencari Spesifik di 1 Artikel Saja (Menggunakan Filter UUID):**
 ```bash
 curl -X 'POST' \
   'http://localhost:8000/search' \
@@ -125,5 +126,18 @@ curl -X 'POST' \
   "limit": 2,
   "article_id": "ae066c24-5c11-544f-8558-3aacd0a19215",
   "section_filter": "4. Results and Discussion"
+}'
+```
+
+**Mencari Spesifik Menggunakan DOI (Sangat Praktis!):**
+```bash
+curl -X 'POST' \
+  'http://localhost:8000/search' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "query": "Apa temuan utamanya?",
+  "limit": 3,
+  "doi": "10.1016/j.iswa.2025.200541"
 }'
 ```

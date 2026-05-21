@@ -242,6 +242,7 @@ class VectorStore:
         n_results: int = 10,
         article_ids: list[str] | None = None,
         section_filter: str | None = None,
+        doi_filter: str | None = None,
     ) -> list[dict]:
         """
         Search for relevant chunks.
@@ -251,6 +252,7 @@ class VectorStore:
             n_results: Number of results to return
             article_ids: Filter by specific article(s). None = all.
             section_filter: Filter by section header (e.g., "Methods")
+            doi_filter: Filter by specific DOI. None = all.
         
         Returns:
             List of dicts with content, metadata, and score
@@ -279,6 +281,14 @@ class VectorStore:
                 FieldCondition(
                     key="section_header",
                     match=MatchValue(value=section_filter),
+                )
+            )
+            
+        if doi_filter:
+            must_conditions.append(
+                FieldCondition(
+                    key="doi",
+                    match=MatchValue(value=doi_filter),
                 )
             )
         

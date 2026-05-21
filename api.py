@@ -33,6 +33,7 @@ class SearchRequest(BaseModel):
     query: str
     limit: int = 5
     article_id: Optional[str] = None
+    doi: Optional[str] = None
     section_filter: Optional[str] = None
 
 class ChunkMetadata(BaseModel):
@@ -88,6 +89,7 @@ def search_articles(req: SearchRequest):
             n_results=req.limit,
             article_ids=article_ids,
             section_filter=req.section_filter,
+            doi_filter=req.doi,
         )
         
         # Format results
