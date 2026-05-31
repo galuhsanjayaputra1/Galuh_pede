@@ -22,8 +22,8 @@ from core.metadata_extractor import ArticleMetadata
 logger = logging.getLogger(__name__)
 
 # === Configuration ===
-CHUNK_SIZE = 1000       # chars (~250 tokens)
-CHUNK_OVERLAP = 200     # chars (~50 tokens), ~20% overlap
+CHUNK_SIZE = 2500       # chars (~600 tokens)
+CHUNK_OVERLAP = 400     # chars (~100 tokens), ~15% overlap
 MIN_CHUNK_SIZE = 100    # Ignore chunks smaller than this
 
 # Headers to split on
