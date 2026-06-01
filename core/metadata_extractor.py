@@ -135,10 +135,18 @@ def extract_authors_heuristic(first_page_text: str, title: str) -> list[str]:
     return authors
 
 
-def fetch_crossref_metadata(doi: str) -> dict | None:
+import difflib
+
+def check_similarity(text1: str, text2: str) -> float:
+    if not text1 or not text2:
+        return 0.0
+    return difflib.SequenceMatcher(None, str(text1).lower(), str(text2).lower()).ratio()
+
+def fetch_crossref_metadata(doi: str, expected_title: str | None = None) -> dict | None:
     """
     Fetch verified metadata from CrossRef API using DOI.
-    This is the most accurate metadata source.
+    If expected_title is provided, it validates the match.
+    If the match fails (e.g., truncated DOI returning a book), it falls back to a title search.
     """
     try:
         url = f"https://api.crossref.org/works/{doi}"
@@ -179,12 +187,22 @@ def fetch_crossref_metadata(doi: str) -> dict | None:
         if date_parts:
             pub_date = "-".join(str(p) for p in date_parts)
 
+        crossref_title = (data.get("title") or [None])[0]
+        
+        # Validasi Kecocokan Judul
+        if expected_title and crossref_title:
+            sim = check_similarity(expected_title, crossref_title)
+            if sim < 0.7:
+                logger.warning(f"CrossRef title mismatch for DOI {doi}. Expected: '{expected_title[:50]}...', Got: '{crossref_title[:50]}...' (Sim: {sim:.2f})")
+                # DOI kemungkinan terpotong/salah, lanjutkan ke fallback pencarian judul
+                return fallback_search_crossref_by_title(expected_title)
+
         result = {
-            "title": (data.get("title") or [None])[0],
+            "title": crossref_title,
             "authors": authors,
             "journal": (data.get("container-title") or [None])[0],
             "publication_date": pub_date,
-            "doi": doi,
+            "doi": data.get("DOI", doi), # Pastikan gunakan DOI resmi dari CrossRef
             "keywords": data.get("subject", []),
         }
 
@@ -193,6 +211,57 @@ def fetch_crossref_metadata(doi: str) -> dict | None:
 
     except Exception as e:
         logger.warning(f"CrossRef API error for DOI {doi}: {e}")
+        if expected_title:
+            return fallback_search_crossref_by_title(expected_title)
+        return None
+
+def fallback_search_crossref_by_title(title: str) -> dict | None:
+    """
+    Fallback mechanism to search CrossRef by title if DOI fails or is truncated.
+    """
+    try:
+        logger.info(f"Attempting CrossRef fallback search for title: {title[:50]}...")
+        url = f"https://api.crossref.org/works?query.title={title}&select=DOI,title,author,container-title,published-print,published-online,subject&rows=3"
+        headers = {"User-Agent": "PEDE/1.0 (mailto:noreply@example.com)"}
+        
+        with httpx.Client(timeout=10.0) as client:
+            res = client.get(url, headers=headers)
+            
+        if res.status_code == 200:
+            items = res.json().get("message", {}).get("items", [])
+            for data in items:
+                crossref_title = (data.get("title") or [None])[0]
+                if crossref_title and check_similarity(title, crossref_title) > 0.7:
+                    # Match found! Parse details
+                    authors = []
+                    for author in data.get("author", []):
+                        given = author.get("given", "")
+                        family = author.get("family", "")
+                        if given and family:
+                            authors.append(f"{given} {family}")
+                        elif family:
+                            authors.append(family)
+
+                    pub_date = None
+                    date_parts = data.get("published-print", {}).get("date-parts", [[]])[0]
+                    if not date_parts:
+                        date_parts = data.get("published-online", {}).get("date-parts", [[]])[0]
+                    if date_parts:
+                        pub_date = "-".join(str(p) for p in date_parts)
+
+                    result = {
+                        "title": crossref_title,
+                        "authors": authors,
+                        "journal": (data.get("container-title") or [None])[0],
+                        "publication_date": pub_date,
+                        "doi": data.get("DOI"),
+                        "keywords": data.get("subject", []),
+                    }
+                    logger.info(f"Fallback search successful. Found DOI: {result['doi']}")
+                    return result
+        return None
+    except Exception as e:
+        logger.warning(f"Fallback search error: {e}")
         return None
 
 
@@ -239,9 +308,16 @@ def extract_metadata(
         meta.authors = extract_authors_heuristic(first_page, meta.title)
 
     # === Layer 3: CrossRef API (DOI-first, most accurate) ===
-    if meta.doi:
-        crossref = fetch_crossref_metadata(meta.doi)
+    if meta.doi or meta.title:
+        # Jika DOI ada, cek lewat DOI + validasi judul. Jika DOI kosong tapi ada judul, otomatis fallback ke pencarian judul.
+        if meta.doi:
+            crossref = fetch_crossref_metadata(meta.doi, expected_title=meta.title)
+        else:
+            crossref = fallback_search_crossref_by_title(meta.title)
+            
         if crossref:
+            if crossref.get("doi"):
+                meta.doi = crossref["doi"] # Perbarui DOI jika terpotong/ada ligature
             if crossref.get("title"):
                 meta.title = crossref["title"]
             if crossref.get("authors"):
