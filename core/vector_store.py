@@ -125,6 +125,17 @@ class VectorStore:
             logger.info(f"Created collection: {self.collection_name}")
         else:
             logger.info(f"Collection already exists: {self.collection_name}")
+            
+        # Ensure payload index for article_id (required by Qdrant Cloud for count filters)
+        try:
+            self.client.create_payload_index(
+                collection_name=self.collection_name,
+                field_name="article_id",
+                field_schema="keyword",
+            )
+            logger.info("Ensured payload index on 'article_id'.")
+        except Exception as e:
+            logger.debug(f"Payload index creation note (might already exist): {e}")
     
     def add_chunks(self, chunks: list[Chunk], batch_size: int = 64) -> int:
         """
