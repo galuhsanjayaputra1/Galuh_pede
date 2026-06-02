@@ -54,6 +54,15 @@ def extract_doi(text: str) -> str | None:
     match = re.search(pattern, text)
     if match:
         doi = match.group(0).rstrip('.')
+        
+        # Clean common PDF ligatures that break DOI matching
+        ligatures = {
+            '\ufb00': 'ff', '\ufb01': 'fi', '\ufb02': 'fl',
+            '\ufb03': 'ffi', '\ufb04': 'ffl', '\ufb05': 'ft', '\ufb06': 'st'
+        }
+        for lig, char in ligatures.items():
+            doi = doi.replace(lig, char)
+            
         logger.info(f"DOI found: {doi}")
         return doi
     return None
@@ -309,10 +318,12 @@ def extract_metadata(
 
     # === Layer 3: CrossRef API (DOI-first, most accurate) ===
     if meta.doi or meta.title:
-        # Jika DOI ada, cek lewat DOI + validasi judul. Jika DOI kosong tapi ada judul, otomatis fallback ke pencarian judul.
+        crossref = None
         if meta.doi:
             crossref = fetch_crossref_metadata(meta.doi, expected_title=meta.title)
-        else:
+            
+        # Jika DOI terpotong/salah dan lookup gagal, fallback ke pencarian judul
+        if not crossref and meta.title:
             crossref = fallback_search_crossref_by_title(meta.title)
             
         if crossref:
