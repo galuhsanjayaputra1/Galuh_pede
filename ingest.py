@@ -38,7 +38,7 @@ from pathlib import Path
 
 from core.pdf_converter import convert_pdf_to_markdown, get_pdf_native_metadata
 from core.metadata_extractor import extract_metadata, ArticleMetadata
-from core.chunker import chunk_markdown, Chunk
+from core.chunker import chunk_markdown, Chunk, CHUNK_SIZE, CHUNK_OVERLAP
 from core.vector_store import VectorStore
 
 # === Logging Setup ===
@@ -63,7 +63,11 @@ def setup_directories():
 
 
 def process_single_pdf(
-    pdf_path: str, vector_store: VectorStore, include_references: bool = False
+    pdf_path: str,
+    vector_store: VectorStore,
+    include_references: bool = False,
+    chunk_size: int = CHUNK_SIZE,
+    chunk_overlap: int = CHUNK_OVERLAP,
 ) -> ArticleMetadata | None:
     """
     Process a single PDF through the full pipeline:
@@ -141,7 +145,20 @@ def process_single_pdf(
         logger.info(f"  -> Authors: {', '.join(article_meta.authors) if article_meta.authors else 'Unknown'}")
         logger.info(f"  -> DOI:     {article_meta.doi or 'Not found'}")
         logger.info(f"  -> Pages:   {article_meta.total_pages}")
-        
+
+        # === Step 2.5: Post-metadata Deduplication Check ===
+        # The early check (Step 0) only catches embedded DOIs / identical file hashes.
+        # Some PDFs (e.g. arXiv preprint + conference version) only resolve their DOI
+        # via CrossRef here, producing a shared article_id. Re-check now so we don't
+        # re-embed and store a duplicate under an article_id that already exists.
+        existing_meta = vector_store.article_exists(article_meta.article_id)
+        if existing_meta:
+            existing_title = existing_meta.get("title", article_meta.title) if isinstance(existing_meta, dict) else article_meta.title
+            logger.info(f"  -> Article already exists in DB (ID: {article_meta.article_id}).")
+            logger.info(f"  -> Existing Title : {existing_title}")
+            logger.info("  -> SKIPPING embedding to avoid duplicate. ✅")
+            return article_meta
+
         # Save metadata JSON for reference
         meta_filename = Path(filename).stem + ".json"
         meta_path = META_DIR / meta_filename
@@ -150,7 +167,10 @@ def process_single_pdf(
         
         # === Step 3: Chunking ===
         logger.info("[3/4] Chunking markdown...")
-        chunks = chunk_markdown(markdown_text, article_meta)
+        chunks = chunk_markdown(
+            markdown_text, article_meta,
+            chunk_size=chunk_size, chunk_overlap=chunk_overlap,
+        )
         
         if not include_references:
             original_count = len(chunks)
@@ -231,14 +251,14 @@ Examples:
     parser.add_argument(
         "--chunk-size",
         type=int,
-        default=1000,
-        help="Max chunk size in chars (default: 1000)",
+        default=CHUNK_SIZE,
+        help=f"Max chunk size in chars (default: {CHUNK_SIZE})",
     )
     parser.add_argument(
         "--chunk-overlap",
         type=int,
-        default=200,
-        help="Chunk overlap in chars (default: 200)",
+        default=CHUNK_OVERLAP,
+        help=f"Chunk overlap in chars (default: {CHUNK_OVERLAP})",
     )
     parser.add_argument(
         "--list",
@@ -339,7 +359,10 @@ Examples:
     results = []
     for i, pdf_path in enumerate(pdf_paths, 1):
         logger.info(f"\n[{i}/{len(pdf_paths)}]")
-        meta = process_single_pdf(pdf_path, vector_store, args.include_references)
+        meta = process_single_pdf(
+            pdf_path, vector_store, args.include_references,
+            chunk_size=args.chunk_size, chunk_overlap=args.chunk_overlap,
+        )
         results.append((pdf_path, meta))
     
     # === Summary ===

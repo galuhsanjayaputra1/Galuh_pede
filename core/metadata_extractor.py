@@ -14,7 +14,32 @@ from dataclasses import dataclass, field, asdict
 
 import httpx
 
+from core.retry import retry_call
+
 logger = logging.getLogger(__name__)
+
+# Status code yang layak diulang (rate-limit / error server sementara).
+_TRANSIENT_STATUS = {429, 500, 502, 503, 504}
+
+
+def _crossref_get(url: str, headers: dict) -> httpx.Response:
+    """GET ke CrossRef dengan retry+backoff untuk error jaringan/sementara."""
+    def _do():
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(url, headers=headers)
+        if resp.status_code in _TRANSIENT_STATUS:
+            raise httpx.HTTPStatusError(
+                f"transient HTTP {resp.status_code}", request=resp.request, response=resp
+            )
+        return resp
+
+    return retry_call(
+        _do,
+        retries=3,
+        base_delay=1.0,
+        exceptions=(httpx.TransportError, httpx.TimeoutException, httpx.HTTPStatusError),
+        label="CrossRef GET",
+    )
 
 
 @dataclass
@@ -261,8 +286,7 @@ def fetch_crossref_metadata(doi: str, expected_title: str | None = None) -> dict
             "User-Agent": "PEDE/1.0 (PDF Embedding Pipeline; mailto:noreply@example.com)"
         }
 
-        with httpx.Client(timeout=10.0) as client:
-            response = client.get(url, headers=headers)
+        response = _crossref_get(url, headers)
 
         if response.status_code != 200:
             logger.warning(f"CrossRef API returned {response.status_code} for DOI {doi}")
@@ -331,9 +355,8 @@ def fallback_search_crossref_by_title(title: str) -> dict | None:
         url = f"https://api.crossref.org/works?query.title={title}&select=DOI,title,author,container-title,published-print,published-online,subject&rows=3"
         headers = {"User-Agent": "PEDE/1.0 (mailto:noreply@example.com)"}
         
-        with httpx.Client(timeout=10.0) as client:
-            res = client.get(url, headers=headers)
-            
+        res = _crossref_get(url, headers)
+
         if res.status_code == 200:
             items = res.json().get("message", {}).get("items", [])
             for data in items:

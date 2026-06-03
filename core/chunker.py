@@ -1,7 +1,7 @@
 """
 Hybrid Smart Chunker for Scientific Articles
 
-Tier 1: MarkdownHeaderTextSplitter — split by section headers
+Tier 1: deterministic markdown header split — split by section headers
 Tier 2: RecursiveCharacterTextSplitter — fallback for large sections
 
 Each chunk gets enriched metadata for precise retrieval.
@@ -12,10 +12,7 @@ import uuid
 import logging
 from dataclasses import dataclass, field
 
-from langchain_text_splitters import (
-    MarkdownHeaderTextSplitter,
-    RecursiveCharacterTextSplitter,
-)
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from core.metadata_extractor import ArticleMetadata
 
@@ -26,12 +23,30 @@ CHUNK_SIZE = 2500       # chars (~600 tokens)
 CHUNK_OVERLAP = 400     # chars (~100 tokens), ~15% overlap
 MIN_CHUNK_SIZE = 100    # Ignore chunks smaller than this
 
-# Headers to split on
-HEADERS_TO_SPLIT = [
-    ("#", "h1"),
-    ("##", "h2"),
-    ("###", "h3"),
-]
+# Level keys for the (up to 3-deep) header hierarchy, matching the old
+# MarkdownHeaderTextSplitter metadata shape ({"h1": ..., "h2": ..., "h3": ...}).
+_LEVEL_KEY = {1: "h1", 2: "h2", 3: "h3"}
+
+# A markdown header line: 1-3 leading '#', a space, then the title text.
+_HEADER_RE = re.compile(r'^(#{1,3})\s+(.*\S)\s*$')
+
+# A whole-line bold span, e.g. "**1 Introduction**" or "**Conclusion**".
+_BOLD_LINE_RE = re.compile(r'^\*\*\s*(.+?)\s*\*\*$')
+
+# A numbered heading like "1 Introduction", "2.1 Data", "3.4.2 Foo".
+_NUMBERED_HEADING_RE = re.compile(r'^(\d+(?:\.\d+)*)\.?\s+\S')
+
+# Common scientific-article section titles (used to promote un-prefixed
+# bold pseudo-headings into real markdown headers).
+_SECTION_KEYWORDS_RE = re.compile(
+    r'(?i)^(abstract|keywords?|introduction|related\s+works?|background|'
+    r'preliminaries|materials?(\s+and\s+methods?)?|methods?|methodology|'
+    r'approach|experiments?|experimental\s+(setup|details?)|results?'
+    r'(\s+and\s+discussions?)?|evaluation|discussions?|ablation(\s+study)?|'
+    r'analysis|conclusions?(\s+and\s+(discussions?|future\s+work))?|'
+    r'future\s+work|acknowledge?ments?|author\s+contributions?|'
+    r'references|bibliography|appendix)\b'
+)
 
 
 @dataclass
@@ -102,6 +117,13 @@ def _has_citation(text: str) -> bool:
     ))
 
 
+def _clean_header(text: str) -> str:
+    """Strip markdown decoration (#, *, _, whitespace) from a header title."""
+    if not text:
+        return text
+    return re.sub(r'^[#\s*_]+', '', re.sub(r'[\s*_]+$', '', text)).strip()
+
+
 def _build_section_hierarchy(header_metadata: dict) -> str:
     """Build section hierarchy string from header metadata."""
     parts = []
@@ -112,11 +134,89 @@ def _build_section_hierarchy(header_metadata: dict) -> str:
 
 
 def _get_deepest_header(header_metadata: dict) -> str:
-    """Get the most specific (deepest) section header."""
-    for key in reversed(["h3", "h2", "h1"]):
-        if key in header_metadata and header_metadata[key]:
+    """Get the most specific (deepest) section header (h3 > h2 > h1)."""
+    for key in ["h3", "h2", "h1"]:
+        if header_metadata.get(key):
             return header_metadata[key]
     return "Unknown"
+
+
+def _promote_bold_headings(markdown_text: str) -> str:
+    """Promote standalone bold lines that look like section headings into real
+    markdown headers.
+
+    Some OCR/PDF->markdown conversions render section titles as bold text on
+    their own line (e.g. ``**1 Introduction**`` or ``**Conclusion**``) instead
+    of ``## 1 Introduction``. Without a ``#`` prefix the document has no
+    structure to split on. This pre-pass rewrites those lines so header
+    splitting can recover the section layout. Lines that already start with
+    ``#`` are left untouched.
+    """
+    out_lines = []
+    for line in markdown_text.split("\n"):
+        stripped = line.strip()
+        m = _BOLD_LINE_RE.match(stripped)
+        if m:
+            inner = m.group(1).strip()
+            # Section titles are short; skip fully-bolded sentences/captions.
+            if inner and len(inner) <= 80 and "|" not in inner:
+                num = _NUMBERED_HEADING_RE.match(inner)
+                if num:
+                    depth = num.group(1).count(".") + 1
+                    level = "#" * min(max(depth + 1, 2), 3)  # top-level -> h2
+                    out_lines.append(f"{level} {inner}")
+                    continue
+                if _SECTION_KEYWORDS_RE.match(inner):
+                    out_lines.append(f"## {inner}")
+                    continue
+        out_lines.append(line)
+    return "\n".join(out_lines)
+
+
+def _split_markdown_by_headers(markdown_text: str) -> list[tuple[str, dict]]:
+    """Deterministically split markdown into sections on ``#``/``##``/``###``
+    header lines, returning ``(section_text, {"h1":..., "h2":..., "h3":...})``.
+
+    This replaces langchain's ``MarkdownHeaderTextSplitter`` because its
+    section detection varies across library versions (e.g. code-fence
+    tracking that can swallow all later headers into a single section). A
+    plain line-by-line scan is version-independent and predictable.
+
+    Header lines are kept at the start of their section (equivalent to
+    ``strip_headers=False``); header titles in the metadata are cleaned of
+    markdown decoration.
+    """
+    sections: list[tuple[str, dict]] = []
+    meta: dict = {}
+    buf: list[str] = []
+
+    def flush():
+        content = "\n".join(buf).strip()
+        if content:
+            sections.append((content, dict(meta)))
+
+    for line in markdown_text.split("\n"):
+        m = _HEADER_RE.match(line)
+        if m:
+            flush()
+            buf = [line]  # keep the header line in the section body
+            level = len(m.group(1))
+            title = _clean_header(m.group(2))
+            # Replace this level and clear any deeper levels.
+            for lv in (1, 2, 3):
+                if lv >= level:
+                    meta.pop(_LEVEL_KEY[lv], None)
+            if title:
+                meta[_LEVEL_KEY[level]] = title
+        else:
+            buf.append(line)
+    flush()
+
+    # No headers at all -> one big section so Tier-2 still chunks the text.
+    if not sections and markdown_text.strip():
+        sections.append((markdown_text.strip(), {}))
+
+    return sections
 
 
 def chunk_markdown(
@@ -144,12 +244,13 @@ def chunk_markdown(
     """
     logger.info(f"Chunking article: {article_meta.title}")
 
-    # === Tier 1: Split by markdown headers ===
-    header_splitter = MarkdownHeaderTextSplitter(
-        headers_to_split_on=HEADERS_TO_SPLIT,
-        strip_headers=False,
-    )
-    header_docs = header_splitter.split_text(markdown_text)
+    # === Tier 0: Normalize headings ===
+    # Recover section structure when the converter emitted bold pseudo-headings
+    # (e.g. "**1 Introduction**") instead of real "## " markdown headers.
+    markdown_text = _promote_bold_headings(markdown_text)
+
+    # === Tier 1: Split by markdown headers (deterministic, version-independent) ===
+    header_docs = _split_markdown_by_headers(markdown_text)
 
     # === Tier 2: Split large sections ===
     recursive_splitter = RecursiveCharacterTextSplitter(
@@ -161,9 +262,8 @@ def chunk_markdown(
 
     chunks: list[Chunk] = []
 
-    for doc in header_docs:
-        text = doc.page_content.strip()
-        header_meta = doc.metadata
+    for text, header_meta in header_docs:
+        text = text.strip()
 
         if len(text) < min_chunk_size:
             continue
