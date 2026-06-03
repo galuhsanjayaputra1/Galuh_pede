@@ -116,12 +116,21 @@ def extract_title_from_markdown(markdown_text: str) -> str:
                 return True
         return False
 
+    def is_valid_title(candidate: str) -> bool:
+        # Should be longer than 15 chars and not a known header
+        if len(candidate) <= 15 or is_skip_header(candidate):
+            return False
+        # Should have at least 3 words (avoids just author names like 'Ali Behrouz')
+        if len(candidate.split()) < 3:
+            return False
+        return True
+
     # Try H1 first
     for line in lines:
         match = re.search(r'^#\s+(.+)$', line)
         if match:
             candidate = match.group(1).strip()
-            if len(candidate) > 10 and not is_skip_header(candidate):
+            if is_valid_title(candidate):
                 return candidate
 
     # Try first bold text
@@ -129,7 +138,7 @@ def extract_title_from_markdown(markdown_text: str) -> str:
         match = re.search(r'^\*\*(.+?)\*\*', line)
         if match:
             candidate = match.group(1).strip()
-            if len(candidate) > 10 and not is_skip_header(candidate):
+            if is_valid_title(candidate):
                 return candidate
 
     # First non-empty line
@@ -137,7 +146,7 @@ def extract_title_from_markdown(markdown_text: str) -> str:
         line = line.strip()
         # Clean markdown characters for the generic fallback check
         cleaned = re.sub(r'^[\#\*\-]+\s*', '', line).strip()
-        if cleaned and len(cleaned) > 10 and not is_skip_header(cleaned):
+        if cleaned and is_valid_title(cleaned):
             return cleaned[:200]
 
     return "Untitled"
