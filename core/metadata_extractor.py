@@ -159,7 +159,7 @@ def extract_title_from_markdown(markdown_text: str) -> str:
         
         # Check H1
         h1_match = re.search(r'^#\s+(.+)$', original_line)
-        bold_match = re.search(r'^\*\*(.+?)\*\*', original_line)
+        bold_match = re.search(r'^\*\*(.+?)\*\*$', original_line)
         
         if h1_match:
             candidate = h1_match.group(1).strip()
@@ -169,8 +169,13 @@ def extract_title_from_markdown(markdown_text: str) -> str:
             score = 5
         else:
             # Plain text
-            candidate = re.sub(r'^[\#\*\-]+\s*', '', original_line).strip()
+            candidate = original_line
             score = 0
+            
+        # Clean up all markdown characters
+        candidate = re.sub(r'^[\#\*\-\_]+\s*', '', candidate)
+        candidate = re.sub(r'\s*[\#\*\-\_]+$', '', candidate)
+        candidate = candidate.strip()
             
         if is_valid_title(candidate):
             # Prioritize earlier lines heavily
@@ -190,12 +195,16 @@ def extract_title_from_markdown(markdown_text: str) -> str:
         # If the next line is also a valid title (continuation of the title), merge them
         best_idx = candidates[0][2]
         if best_idx + 1 < len(lines):
-            next_line = re.sub(r'^[\#\*\-]+\s*', '', lines[best_idx + 1]).strip()
+            next_line = lines[best_idx + 1]
+            next_line = re.sub(r'^[\#\*\-\_]+\s*', '', next_line)
+            next_line = re.sub(r'\s*[\#\*\-\_]+$', '', next_line)
+            next_line = next_line.strip()
+            
             if next_line and not is_skip_header(next_line) and len(next_line.split()) >= 1:
                 # Merge if it doesn't look like an author line (no commas, no university, no email)
                 if not re.search(r'[@\d]|university|department|institute', next_line, re.IGNORECASE):
                     # Only merge if it's not a completely separate header
-                    if len(next_line) > 3 and not next_line.startswith('**'):
+                    if len(next_line) > 3:
                         best_candidate = f"{best_candidate} {next_line}"
         
         return best_candidate[:200]
