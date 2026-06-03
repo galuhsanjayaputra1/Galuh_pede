@@ -16,6 +16,7 @@ dense-only (tetap named vector "dense"), sehingga pipeline tetap jalan.
 
 import os
 import logging
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 # Load env variables (for Qdrant Cloud)
@@ -90,7 +91,22 @@ class VectorStore:
 
         # Connect to Cloud if URL is provided, otherwise use Local DB
         if QDRANT_URL and QDRANT_API_KEY:
-            logger.info(f"Connecting to Qdrant Cloud at {QDRANT_URL}")
+            # Guard: kesalahan umum adalah menukar QDRANT_URL <-> QDRANT_API_KEY.
+            # Validasi sebelum konek, dan JANGAN cetak nilai URL/key ke log
+            # (cegah kebocoran key jika tertukar).
+            if not QDRANT_URL.lower().startswith(("http://", "https://")):
+                raise ValueError(
+                    "QDRANT_URL tidak valid: harus diawali 'http://' atau 'https://' "
+                    "(mis. https://xxx.qdrant.io). Kemungkinan tertukar dengan "
+                    "QDRANT_API_KEY - periksa kembali Colab Secrets / environment."
+                )
+            if QDRANT_API_KEY.lower().startswith(("http://", "https://")):
+                raise ValueError(
+                    "QDRANT_API_KEY tampak berisi URL - kemungkinan tertukar dengan "
+                    "QDRANT_URL. Periksa kembali Colab Secrets / environment."
+                )
+            host = urlparse(QDRANT_URL).hostname or "?"
+            logger.info(f"Connecting to Qdrant Cloud at {host}")  # host saja, bukan key
             self.client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
         else:
             logger.info(f"Connecting to Qdrant Local DB at {qdrant_path}")
