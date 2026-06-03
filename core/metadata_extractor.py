@@ -107,7 +107,15 @@ def extract_title_from_markdown(markdown_text: str) -> str:
         r'(?i)^preprint',
         r'(?i)^copyright',
         r'(?i)^published\s+in',
-        r'(?i)^\d{4}\s*$'
+        r'(?i)^\d{4}\s*$',
+        r'(?i)^(data\s+and\s+)?code\s+availability$',
+        r'(?i)^abstract$',
+        r'(?i)^introduction$',
+        r'(?i)^acknowledgments?$',
+        r'(?i)^acknowledgements?$',
+        r'(?i)^references?$',
+        r'(?i)^conclusions?$',
+        r'(?i)^appendix\s+[a-z]$'
     ]
     
     def is_skip_header(line: str) -> bool:
