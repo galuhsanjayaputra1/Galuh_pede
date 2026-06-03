@@ -115,7 +115,12 @@ def extract_title_from_markdown(markdown_text: str) -> str:
         r'(?i)^acknowledgements?$',
         r'(?i)^references?$',
         r'(?i)^conclusions?$',
-        r'(?i)^appendix\s+[a-z]$'
+        r'(?i)^appendix\s+[a-z]$',
+        r'(?i)institutional\s+review\s+board',
+        r'(?i)^ethics\s+statement',
+        r'(?i)^funding',
+        r'(?i)^declaration',
+        r'(?i)competing\s+interest'
     ]
     
     def is_skip_header(line: str) -> bool:
