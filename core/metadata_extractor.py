@@ -146,29 +146,59 @@ def extract_title_from_markdown(markdown_text: str) -> str:
             return False
         return True
 
-    # Try H1 first
-    for line in lines:
-        match = re.search(r'^#\s+(.+)$', line)
-        if match:
-            candidate = match.group(1).strip()
-            if is_valid_title(candidate):
-                return candidate
-
-    # Try first bold text
-    for line in lines:
-        match = re.search(r'^\*\*(.+?)\*\*', line)
-        if match:
-            candidate = match.group(1).strip()
-            if is_valid_title(candidate):
-                return candidate
-
-    # First non-empty line
-    for line in lines:
-        line = line.strip()
-        # Clean markdown characters for the generic fallback check
-        cleaned = re.sub(r'^[\#\*\-]+\s*', '', line).strip()
-        if cleaned and is_valid_title(cleaned):
-            return cleaned[:200]
+    # Scan the first 50 lines to find the best title candidate
+    candidates = []
+    
+    for i, line in enumerate(lines[:50]):
+        original_line = line.strip()
+        if not original_line:
+            continue
+            
+        candidate = ""
+        score = 0
+        
+        # Check H1
+        h1_match = re.search(r'^#\s+(.+)$', original_line)
+        bold_match = re.search(r'^\*\*(.+?)\*\*', original_line)
+        
+        if h1_match:
+            candidate = h1_match.group(1).strip()
+            score = 10
+        elif bold_match:
+            candidate = bold_match.group(1).strip()
+            score = 5
+        else:
+            # Plain text
+            candidate = re.sub(r'^[\#\*\-]+\s*', '', original_line).strip()
+            score = 0
+            
+        if is_valid_title(candidate):
+            # Prioritize earlier lines heavily
+            score += (50 - i) * 0.5
+            
+            # Penalize if it looks like a continuation of a sentence (starts with lowercase)
+            if candidate and candidate[0].islower():
+                score -= 5
+                
+            candidates.append((score, candidate, i))
+            
+    if candidates:
+        # Sort by score descending
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        best_candidate = candidates[0][1]
+        
+        # If the next line is also a valid title (continuation of the title), merge them
+        best_idx = candidates[0][2]
+        if best_idx + 1 < len(lines):
+            next_line = re.sub(r'^[\#\*\-]+\s*', '', lines[best_idx + 1]).strip()
+            if next_line and not is_skip_header(next_line) and len(next_line.split()) >= 1:
+                # Merge if it doesn't look like an author line (no commas, no university, no email)
+                if not re.search(r'[@\d]|university|department|institute', next_line, re.IGNORECASE):
+                    # Only merge if it's not a completely separate header
+                    if len(next_line) > 3 and not next_line.startswith('**'):
+                        best_candidate = f"{best_candidate} {next_line}"
+        
+        return best_candidate[:200]
 
     return "Untitled"
 
