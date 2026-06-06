@@ -9,6 +9,8 @@ import fitz  # PyMuPDF
 import os
 import logging
 import re
+import pytesseract
+from pdf2image import convert_from_path
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,21 @@ def clean_markdown_text(md_text: str) -> str:
     
     return md_text
 
+
+def fallback_ocr_pdf(pdf_path: str) -> str:
+    """Fallback OCR using Tesseract for image-based or DRM-protected PDFs."""
+    logger.info(f"Initiating OCR fallback for {pdf_path}")
+    try:
+        images = convert_from_path(pdf_path)
+        ocr_text = ""
+        for i, img in enumerate(images):
+            logger.info(f"OCR processing page {i+1}/{len(images)}...")
+            text = pytesseract.image_to_string(img)
+            ocr_text += text + "\n\n"
+        return ocr_text
+    except Exception as e:
+        logger.error(f"OCR Fallback failed: {e}")
+        return ""
 
 
 def convert_pdf_to_markdown(
@@ -72,6 +89,14 @@ def convert_pdf_to_markdown(
         image_path=image_dir or "./data/images",
         show_progress=False,
     )
+    
+    # Check if we need OCR fallback (e.g., less than 1000 characters extracted)
+    if len(md_text.strip()) < 1000:
+        logger.warning(f"Extracted text too short ({len(md_text)} chars). Attempting OCR fallback...")
+        ocr_text = fallback_ocr_pdf(pdf_path)
+        if len(ocr_text) > len(md_text):
+            md_text = ocr_text
+            logger.info(f"OCR fallback successful. New length: {len(md_text)} chars")
     
     # Apply modern RAG text cleaning
     md_text = clean_markdown_text(md_text)
