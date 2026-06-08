@@ -48,7 +48,7 @@ def fallback_ocr_pdf(pdf_path: str) -> str:
     try:
         from paddleocr import PaddleOCR
         # Initialize lazily to save memory if OCR is not needed
-        ocr = PaddleOCR(use_angle_cls=True, lang='en', show_log=False)
+        ocr = PaddleOCR(use_angle_cls=True, lang='en')
         
         images = convert_from_path(pdf_path)
         ocr_text = ""
