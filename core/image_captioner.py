@@ -25,12 +25,12 @@ def generate_image_caption(image_path: str) -> Optional[str]:
         return None
 
     try:
-        import google.generativeai as genai
+        from google import genai
         import PIL.Image
         
-        genai.configure(api_key=api_key)
+        client = genai.Client(api_key=api_key)
         # Using Gemini 2.5 Flash based on user's dashboard availability
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model_name = 'gemini-2.5-flash'
         
         img = PIL.Image.open(image_path)
         
@@ -48,7 +48,10 @@ def generate_image_caption(image_path: str) -> Optional[str]:
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                response = model.generate_content([prompt, img])
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=[prompt, img]
+                )
                 if response and response.text:
                     # Sleep to respect 5 RPM free tier limit (1 request every 12 seconds)
                     time.sleep(12) 
@@ -68,5 +71,5 @@ def generate_image_caption(image_path: str) -> Optional[str]:
         return None
         
     except ImportError:
-        logger.error("google-generativeai or pillow is not installed. Skipping image captioning.")
+        logger.error("google-genai or pillow is not installed. Skipping image captioning.")
         return None
