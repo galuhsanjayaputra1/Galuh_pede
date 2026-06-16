@@ -182,16 +182,21 @@ def extract_title_from_markdown(markdown_text: str) -> str:
         candidate = ""
         score = 0
         
-        # Check H1
-        h1_match = re.search(r'^#\s+(.+)$', original_line)
+        # Check heading (H1-H6) or bold. Many papers render the title as "## **Title**"
+        # (H2/H3 + bold) rather than a bare H1, so match any heading level; the leading
+        # "**" is cleaned by strip() below.
+        heading_match = re.search(r'^#{1,6}\s+(.+)$', original_line)
         bold_match = re.search(r'^\*\*(.+?)\*\*$', original_line)
         
-        if h1_match:
-            candidate = h1_match.group(1).strip()
+        is_structural = False
+        if heading_match:
+            candidate = heading_match.group(1).strip()
             score = 10
+            is_structural = True
         elif bold_match:
             candidate = bold_match.group(1).strip()
             score = 5
+            is_structural = True
         else:
             # Plain text
             candidate = original_line
@@ -204,8 +209,11 @@ def extract_title_from_markdown(markdown_text: str) -> str:
             # Prioritize earlier lines heavily
             score += (50 - i) * 0.5
             
-            # Penalize if it looks like a continuation of a sentence (starts with lowercase)
-            if candidate and candidate[0].islower():
+            # Penalize sentence-continuation (starts lowercase) — but ONLY for plain text.
+            # Real titles starting lowercase are common here ("fMRI-S4", "iBCI", "miMamba")
+            # and are already structurally marked as heading/bold; penalizing them would let
+            # an Uppercase-initial author line outscore the real title.
+            if candidate and candidate[0].islower() and not is_structural:
                 score -= 5
                 
             candidates.append((score, candidate, i))
