@@ -2,7 +2,7 @@
 
 PEDE menyediakan REST API berbasis **FastAPI** ringan yang menjembatani aplikasi eksternal (seperti backend Golang Anda) dengan mesin *Semantic Search* Qdrant.
 
-API ini akan secara otomatis memuat model *embedding* (Nomic-AI) ke dalam memori untuk memastikan proses vektorisasi berjalan dalam hitungan milidetik.
+API ini akan secara otomatis memuat model *embedding* **BGE-M3** (hybrid dense+sparse, via FlagEmbedding) ke dalam memori untuk memastikan proses vektorisasi berjalan dalam hitungan milidetik.
 
 ---
 

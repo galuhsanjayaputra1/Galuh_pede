@@ -1,10 +1,20 @@
 # 📄 PEDE — PDF to Model Embedding
 
-Pipeline CLI untuk mengkonversi artikel ilmiah PDF ke vector embeddings di Qdrant.
+PEDE = **(1) pipeline ingestion** PDF ilmiah → vector embeddings di Qdrant, **dan
+(2) search/embedding server** (RAG) di atas embedding tersebut.
 
 ```
-PDF → Markdown → Smart Chunking + Metadata → Embedding → Qdrant Vector DB
+PDF → Markdown → Smart Chunking + Metadata → Embedding → Qdrant Vector DB → /search (RAG)
 ```
+
+Tujuan RAG: **menekan halusinasi LLM** saat menulis manuskrip / studi ablasi — setiap
+klaim, angka, atau fakta bisa di-*ground* ke chunk asli paper (dengan provenance DOI +
+section), bukan dikarang LLM. Server ini juga yang di-query backend **`nsa`** untuk
+full-text screening (Modul 6) & sintesis (Modul 9).
+
+Dua mode pemakaian, keduanya bisa **Colab (GPU gratis)** atau **PC lokal ber-GPU**:
+- **Ingest** (`ingest.py`) — masukkan PDF ke Qdrant. Lihat *Quick Start* & *Colab*.
+- **Serve** (`api.py` lokal / `embed_server_colab.ipynb` Colab) — RAG search. Lihat *Serve Embedding*.
 
 cek hasil chunking:
 
@@ -21,6 +31,11 @@ python dump_chunks.py --doi "10.1016/j.inpa.2026.02.006"
 ```bash
 pip install -r requirements.txt
 ```
+
+> **🖥️ GPU vs CPU.** Embedding memakai **BGE-M3** (FlagEmbedding). Di mesin ber-**GPU
+> NVIDIA (CUDA)** model otomatis jalan **fp16** → cepat (ingest & search). Tanpa GPU tetap
+> jalan di **CPU**, hanya jauh lebih lambat (bge-m3 ~2.3GB). Jika Anda tak punya GPU,
+> pakai **Google Colab** (GPU gratis) untuk ingest maupun serve — lihat bagian masing-masing.
 
 ### 2. Konfigurasi Qdrant (Lokal vs Cloud)
 
@@ -111,6 +126,63 @@ Berkat **deduplikasi berbasis konten** (DOI / SHA-256 hash file), Anda **boleh m
 - ⚠️ **Model embedding (~2.3GB) di-unduh ulang tiap sesi baru** Colab (tidak di-cache ke Drive).
 - ⚠️ **PDF tanpa DOI tertanam** (DOI hanya didapat via CrossRef) akan **dikonversi ulang (OCR)** tiap re-run sebelum di-skip di Step 2.5 — benar, tapi boros waktu.
 
+## 🔍 Serve Embedding / Search Server (RAG)
+
+Setelah PDF ter-ingest, jalankan **server pencarian** agar bisa di-query (RAG). Search-nya
+**hybrid (dense + sparse, RRF fusion)** memakai model & logika yang **identik** dengan
+ingest (`core/vector_store.py`) — jadi tidak ada duplikasi/parity-drift. Dua cara:
+
+### A. PC lokal ber-GPU — `api.py` (FastAPI ringan)
+
+```bash
+python api.py            # atau: uvicorn api:app --host 0.0.0.0 --port 8000
+```
+- Endpoint: `GET /` (health) dan `POST /search`. Docs interaktif: **http://localhost:8000/docs**.
+- Tanpa auth, untuk pemakaian lokal/dev. Detail field & contoh cURL: **[API_REFERENCE.md](API_REFERENCE.md)**.
+- Kredensial Qdrant dibaca dari `.env` (sama seperti ingest) — pastikan menunjuk Qdrant yang sama dengan tempat Anda ingest.
+
+```bash
+curl -X POST http://localhost:8000/search -H 'Content-Type: application/json' \
+  -d '{"query":"berapa akurasi pada dataset ABIDE?","limit":5,"doi":"10.1007/978-3-031-17899-3_16"}'
+```
+
+### B. Google Colab (GPU gratis, publik) — `notebooks/embed_server_colab.ipynb`
+
+Untuk yang **tak punya GPU** atau ingin server yang **bisa diakses backend `nsa`** dari
+internet. Notebook ini menjalankan server BGE-M3 + membuka **Cloudflare Tunnel** → URL publik.
+
+1. Buka notebook di Colab → set **Runtime = GPU** → isi Colab Secrets `QDRANT_URL`,
+   `QDRANT_API_KEY` (+ opsional `TELEGRAM_*` untuk monitor) → **Run all**.
+2. Endpoint: `POST /search` (hybrid RRF) **dan** `POST /v1/embeddings` (OpenAI-compatible,
+   dense). Dilindungi **bearer token** (`EMBED_API_KEY`) yang tercetak otomatis.
+3. Sel terakhir mencetak yang perlu ditempel ke **`.env` repo `nsa`**:
+   ```ini
+   SEARCH_ENDPOINT=https://<random>.trycloudflare.com/search
+   EMBED_API_KEY=<token>
+   EMBED_MODEL=BAAI/bge-m3
+   # opsional (bila nsa butuh vektor dense): EMBED_ENDPOINT=https://<random>.trycloudflare.com/v1
+   ```
+4. Biarkan sel penjaga-sesi berjalan (keep-alive + health monitor). **URL kedaluwarsa saat
+   sesi Colab berhenti** — jalankan ulang untuk URL baru, lalu perbarui `.env` `nsa`.
+
+> Server `/search` hanya butuh dependency ringan (FlagEmbedding, qdrant-client, fastapi) —
+> TIDAK perlu PaddleOCR/PyMuPDF/Gemini (itu khusus ingest), jadi start-up cepat.
+
+## ✍️ RAG untuk Penulisan Manuskrip (anti-halusinasi)
+
+Pakai `/search` (atau `python ingest.py --search`) sebagai **lapisan grounding** saat menulis
+artikel, supaya LLM **tidak mengarang** fakta/angka:
+
+- **Grounding klaim & angka** — sebelum menulis "metode X mencapai akurasi Y%", query
+  faktanya dulu; sodorkan chunk hasil + DOI ke LLM sebagai konteks, baru minta ia menyusun
+  kalimat. Setiap kalimat punya **provenance** (DOI + `section_header`) yang bisa diaudit.
+- **Studi ablasi / komparasi** — query per-paper via `doi` (atau `article_id`) untuk menarik
+  angka eksperimen spesifik (mis. `section_filter:"Results"`) lintas paper secara konsisten.
+- **Sitasi yang benar** — karena hasil membawa DOI + judul + authors, LLM mengutip sumber
+  yang **benar-benar ada** di korpus (mencegah sitasi fiktif).
+- **Dipakai `nsa`** — backend SLR meng-query server ini untuk full-text screening (Modul 6)
+  & sintesis manuskrip (Modul 9), sehingga keputusan/tulisan ter-*ground* ke bukti.
+
 ## Architecture
 
 | Stage | Tool | Output |
@@ -172,39 +244,21 @@ python ingest.py --search "Apa itu neurosymbolic?"
 python ingest.py --search "Apa hasil eksperimennya?" --doi "10.1016/j.inpa.2026.02.006"
 ```
 
-## 🤖 Integration with Golang Agentic AI
+## 🤖 Integrasi dengan backend `nsa` (Agentic SLR)
 
-Proyek ini telah dilengkapi dengan purwarupa **Agentic AI** berbasis Golang di dalam folder `agent-go/`. 
+PEDE adalah **layer ingestion + RAG** untuk orkestrator SLR Golang **`nsa`**. Alurnya:
 
-Agen Golang ini menggunakan SDK `github.com/google/generative-ai-go` dan dilengkapi kemampuan **Function Calling** (Tools). Ia tidak memanggil Qdrant secara langsung, melainkan menggunakan API Server Python (`api.py`) sebagai jembatan.
+1. **Ingest** PDF korpus → Qdrant (via `ingest.py` / Colab).
+2. **Serve** `embed_server_colab.ipynb` (Colab GPU + Cloudflare Tunnel) → URL publik.
+3. Tempel `SEARCH_ENDPOINT` + `EMBED_API_KEY` ke `.env` repo **`nsa`**.
+4. `nsa` mengirim `POST /search` `{ "query": "...", "n_results": 10 }` (opsional
+   `article_ids` / `section_filter` / `doi_filter`) dan menerima chunk **hybrid RRF** —
+   logika pencarian identik dengan PEDE, tanpa duplikasi kode embedding di `nsa`.
+5. `nsa` memakai chunk ini untuk **full-text screening (Modul 6)** dan **sintesis manuskrip
+   (Modul 9)** yang ter-*ground* ke bukti (anti-halusinasi).
 
-### Arsitektur Agentic RAG
-1. **User Prompt:** Anda bertanya *"Apa hasil eksperimen jurnal X?"* di terminal Golang.
-2. **Gemini Reasoning:** LLM Gemini menyadari bahwa itu adalah pertanyaan akademis, lalu ia memutuskan untuk menggunakan fungsi `query_scientific_database`.
-3. **Golang Action:** Golang menangkap permintaan fungsi tersebut, lalu mengirim HTTP POST `{"query": "...", "doi": "..."}` ke `http://localhost:8000/search`.
-4. **Python RAG:** FastAPI meng-embed *query* via BGE-M3, mencari 5 *chunks* terdekat di Qdrant, dan mengembalikannya ke Golang.
-5. **Synthesis:** Golang menyodorkan 5 *chunks* tersebut ke Gemini, dan Gemini merangkumnya menjadi jawaban akhir yang sangat akurat.
-
-### Cara Menjalankan Agen Golang
-1. Pastikan server API Python berjalan:
-   ```bash
-   uvicorn api:app --port 8000
-   ```
-2. Buka terminal baru, masuk ke folder `agent-go`:
-   ```bash
-   cd agent-go
-   ```
-3. Set *environment variable* untuk Gemini API Key Anda:
-   ```bash
-   # Windows PowerShell
-   $env:GEMINI_API_KEY="AIzaSy..."
-   ```
-4. Jalankan agen:
-   ```bash
-   go run .
-   ```
-
-Selamat bereksperimen dengan Agentic RAG Anda!
+> Untuk eksperimen RAG manual (di luar `nsa`), cukup panggil `POST /search` langsung —
+> lihat **[API_REFERENCE.md](API_REFERENCE.md)** untuk contoh cURL lengkap.
 
 ## License
 
