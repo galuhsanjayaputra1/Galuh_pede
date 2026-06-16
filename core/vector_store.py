@@ -33,6 +33,7 @@ from qdrant_client.models import (
     FieldCondition,
     MatchValue,
     MatchAny,
+    FilterSelector,
     Prefetch,
     FusionQuery,
     Fusion,
@@ -302,6 +303,17 @@ class VectorStore:
         except Exception as e:
             logger.debug(f"Payload index creation note (might already exist): {e}")
 
+        # Index 'doi' too — needed for the stale-duplicate self-heal filter (delete by doi).
+        try:
+            self.client.create_payload_index(
+                collection_name=self.collection_name,
+                field_name="doi",
+                field_schema="keyword",
+            )
+            logger.info("Ensured payload index on 'doi'.")
+        except Exception as e:
+            logger.debug(f"Payload index 'doi' note (might already exist): {e}")
+
     def add_chunks(self, chunks: list[Chunk], batch_size: int = 64) -> int:
         """Embed (hybrid) & simpan chunks ke Qdrant. Return jumlah chunk tersimpan."""
         if not chunks:
@@ -341,7 +353,36 @@ class VectorStore:
         )
 
         logger.info(f"Stored {len(all_points)} chunks in Qdrant")
+
+        # Self-heal: setelah entri baru tersimpan, buang entri LAMA dari paper yang sama
+        # (DOI identik) yang ter-ingest di bawah article_id BERBEDA. Ini terjadi ketika run
+        # sebelumnya gagal menemukan DOI (article_id berbasis hash-file) lalu run ini berhasil
+        # me-resolve DOI (article_id berbasis DOI) — tanpa pembersihan ini entri lama jadi
+        # duplikat yatim di Qdrant. Dijalankan SETELAH upsert agar paper tak pernah hilang.
+        art_id = getattr(chunks[0], "article_id", None)
+        doi = (getattr(chunks[0], "doi", None) or "").strip()
+        if doi and art_id:
+            self._cleanup_stale_doi_duplicates(doi, keep_article_id=art_id)
+
         return len(all_points)
+
+    def _cleanup_stale_doi_duplicates(self, doi: str, keep_article_id: str) -> None:
+        """Hapus chunk dengan DOI sama tetapi article_id berbeda (duplikat yatim dari run
+        sebelum DOI ter-resolve). Aman lintas-tenant: DOI sama = paper yang sama untuk semua
+        pengguna (collection di-share by-design); kita hanya menyatukan ke article_id baru."""
+        try:
+            flt = Filter(
+                must=[FieldCondition(key="doi", match=MatchValue(value=doi))],
+                must_not=[FieldCondition(key="article_id", match=MatchValue(value=keep_article_id))],
+            )
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=FilterSelector(filter=flt),
+                wait=True,
+            )
+            logger.info(f"Self-heal: cleared stale duplicates for doi={doi} under other article_ids.")
+        except Exception as e:
+            logger.warning(f"Self-heal stale-doi cleanup skipped: {e}")
 
     def delete_article(self, article_id: str) -> bool:
         """Hapus semua chunk milik satu artikel."""
