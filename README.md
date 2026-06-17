@@ -181,7 +181,7 @@ internet. Notebook ini menjalankan server BGE-M3 + membuka **Cloudflare Tunnel**
 > — tak ada lagi `…/search/embeddings` atau `…/search/search`.
 
 > Server hanya butuh dependency ringan (FlagEmbedding, qdrant-client, fastapi) — TIDAK perlu
-> PaddleOCR/PyMuPDF/Gemini (itu khusus ingest), jadi start-up cepat.
+> PaddleOCR/PyMuPDF/Qwen2.5-VL (itu khusus ingest), jadi start-up cepat.
 
 ## ✍️ RAG untuk Penulisan Manuskrip (anti-halusinasi)
 

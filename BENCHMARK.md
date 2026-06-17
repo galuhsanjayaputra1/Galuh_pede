@@ -38,7 +38,7 @@ Untuk mengevaluasi ketangguhan sistem pencarian secara komprehensif, pengujian (
 Evaluasi Sistem *Retrieval* (Pengambilan Data) adalah nyawa dari arsitektur RAG. Berikut adalah penjelasan ringkas mengapa kolom-kolom metrik di atas sangat penting untuk dipantau dalam fase eksperimen Anda:
 
 ### 1. `Top-K (Limit)`
-- **Definisi:** Jumlah *chunk* maksimal yang dikembalikan oleh Qdrant ke Gemini.
+- **Definisi:** Jumlah *chunk* maksimal yang dikembalikan oleh Qdrant ke LLM.
 - **Insight:** Terkadang, menyetel *Top-K* ke angka 10 dengan ukuran *chunk* yang lebih kecil (misal 500 karakter) justru memberikan konteks yang jauh lebih beragam (berasal dari berbagai halaman) dibandingkan mengambil *Top-K* 3 dengan *chunk* raksasa.
 
 ### 2. `Hit Rate (Recall@K)`
