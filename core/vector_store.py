@@ -1,23 +1,24 @@
 """
-Qdrant Vector Store Operations — Hybrid (Dense + Sparse) dengan BGE-M3.
+Qdrant Vector Store Operations — Dense retrieval with Word2Vec or SentenceTransformer.
 
-Memakai FlagEmbedding `BGEM3FlagModel` untuk menghasilkan vektor **dense** (1024-d)
-dan **sparse/lexical** sekaligus dalam satu kali encode, menyimpan keduanya di
-Qdrant sebagai *named vectors* ("dense" + "sparse"), lalu melakukan **hybrid
-search** dengan RRF fusion — memanfaatkan kekuatan M3 untuk istilah eksak
-(nama model, kode dataset, DOI) sekaligus kemiripan semantik.
+Memakai gensim Word2Vec embeddings untuk membuat dense vector representations
+pada semua chunk dan query. Word2Vec embeddings dihitung sebagai rata-rata
+vektor kata dari setiap dokumen/chunk.
 
 Setiap chunk di-embed dengan **konteks** (judul + section header) diprepend ke
 isi, agar sub-chunk yang panjang tidak kehilangan konteks section.
 
-Fallback: bila FlagEmbedding tidak tersedia, otomatis memakai SentenceTransformer
-dense-only (tetap named vector "dense"), sehingga pipeline tetap jalan.
+Fallback: bila Word2Vec tidak tersedia, otomatis memakai SentenceTransformer
+dense-only, sehingga pipeline tetap jalan.
 """
 
 import os
+import re
 import logging
 from urllib.parse import urlparse
 from dotenv import load_dotenv
+
+import numpy as np
 
 # Load env variables (for Qdrant Cloud)
 load_dotenv()
@@ -46,9 +47,9 @@ logger = logging.getLogger(__name__)
 
 # === Configuration ===
 COLLECTION_NAME = "scientific_articles"
-EMBEDDING_MODEL = "BAAI/bge-m3"  # 8192 context, 1024-d, multilingual, hybrid-capable
-DENSE_DIM = 1024
-MAX_LENGTH = 8192  # full BGE-M3 context window
+EMBEDDING_MODEL = "word2vec-google-news-300"  # default pretrained gensim Word2Vec model
+DENSE_DIM = 300
+MAX_LENGTH = 8192  # reserved for legacy BGE-M3 handling
 
 # Named vectors in Qdrant
 DENSE_VECTOR = "dense"
@@ -122,8 +123,19 @@ class VectorStore:
     #  Model loading
     # ------------------------------------------------------------------ #
     def _load_model(self, embedding_model: str):
-        """Coba FlagEmbedding (hybrid); jika gagal, fallback SentenceTransformer."""
+        """Coba Word2Vec; jika gagal, fallback SentenceTransformer."""
+        is_word2vec = "word2vec" in embedding_model.lower()
         is_m3 = "m3" in embedding_model.lower()
+
+        if is_word2vec:
+            try:
+                self._load_word2vec(embedding_model)
+                return
+            except Exception as e:
+                logger.warning(
+                    f"Word2Vec loading failed ({e}). "
+                    f"Fallback ke SentenceTransformer dense-only."
+                )
 
         if is_m3:
             try:
@@ -146,6 +158,31 @@ class VectorStore:
                 )
 
         self._load_sentence_transformer(embedding_model, is_m3)
+
+    def _load_word2vec(self, embedding_model: str):
+        """Load a gensim Word2Vec model from gensim-data alias or local file."""
+        try:
+            from gensim.models import KeyedVectors
+        except ImportError as e:
+            raise ImportError(
+                "gensim is required for Word2Vec embeddings. "
+                "Install with 'pip install gensim'."
+            ) from e
+
+        if os.path.exists(embedding_model):
+            binary = embedding_model.lower().endswith((".bin", ".bin.gz"))
+            self.model = KeyedVectors.load_word2vec_format(
+                embedding_model, binary=binary, unicode_errors="ignore"
+            )
+            logger.info(f"Loaded Word2Vec model from local path: {embedding_model}")
+        else:
+            import gensim.downloader as api
+            self.model = api.load(embedding_model)
+            logger.info(f"Loaded Word2Vec model from gensim-data: {embedding_model}")
+
+        self.backend = "Word2Vec"
+        self.hybrid = False
+        self.vector_size = self.model.vector_size
 
     def _load_sentence_transformer(self, embedding_model: str, is_m3: bool):
         """Fallback dense-only via SentenceTransformer (dengan penanganan offline)."""
@@ -217,6 +254,26 @@ class VectorStore:
         return f"{head}\n\n{chunk.content}" if head else chunk.content
 
     @staticmethod
+    def _tokenize_text(text: str) -> list[str]:
+        return re.findall(r"\w+", text.lower())
+
+    def _embed_text(self, text: str) -> list[float]:
+        tokens = self._tokenize_text(text)
+        vectors = []
+        for tok in tokens:
+            if tok in self.model.key_to_index:
+                vectors.append(self.model.get_vector(tok))
+
+        if not vectors:
+            return [0.0] * self.vector_size
+
+        avg = np.mean(vectors, axis=0)
+        norm = np.linalg.norm(avg)
+        if norm > 0:
+            avg = avg / norm
+        return _to_list(avg)
+
+    @staticmethod
     def _to_sparse_vector(lexical_weights: dict) -> SparseVector:
         """Konversi lexical_weights BGE-M3 (token_id -> weight) ke SparseVector Qdrant."""
         indices, values = [], []
@@ -229,6 +286,10 @@ class VectorStore:
 
     def _embed_documents(self, texts: list[str]):
         """Return (dense_list, sparse_list_or_None) untuk daftar teks dokumen."""
+        if self.backend == "Word2Vec":
+            dense = [self._embed_text(text) for text in texts]
+            return dense, None
+
         if self.hybrid:
             out = self.model.encode(
                 texts,
@@ -251,6 +312,9 @@ class VectorStore:
 
     def _embed_query(self, query: str):
         """Return (dense_vec, sparse_vec_or_None) untuk satu query."""
+        if self.backend == "Word2Vec":
+            return self._embed_text(query), None
+
         if self.hybrid:
             out = self.model.encode(
                 [query],
@@ -290,6 +354,22 @@ class VectorStore:
             )
             logger.info(f"Created collection (hybrid schema): {self.collection_name}")
         else:
+            info = self.client.get_collection(self.collection_name)
+            existing_dim = None
+            try:
+                existing_dim = getattr(
+                    info.vectors_config[DENSE_VECTOR].params, "size", None
+                )
+            except Exception:
+                existing_dim = None
+
+            if existing_dim and existing_dim != self.vector_size:
+                raise ValueError(
+                    f"Existing collection '{self.collection_name}' has vector dim {existing_dim}, "
+                    f"but current embedding dim is {self.vector_size}. "
+                    "Please recreate the collection or set a different collection name."
+                )
+
             logger.info(f"Collection already exists: {self.collection_name}")
 
         # Ensure payload index for article_id (required for count/scroll filters)
