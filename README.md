@@ -278,6 +278,8 @@ PEDE adalah **layer ingestion + RAG** untuk orkestrator SLR Golang **`nsa`**. Al
 ## License
 
 GNU GPL v3
-#   K e c e r d a s a n B u a t a n  
- #   K e c e r d a s a n B u a t a n  
+#   K e c e r d a s a n B u a t a n 
+ 
+ #   K e c e r d a s a n B u a t a n 
+ 
  
